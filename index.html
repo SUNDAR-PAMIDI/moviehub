@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Hub – Browse Movies and Series</title>
+  <meta name="description" content="Browse and search popular movies and TV series with posters, ratings and genres.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="navbar" id="top">
+    <div class="container nav-inner">
+      <a href="#home" class="logo">Movie<span>Hub</span></a>
+      <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="navLinks">
+        <span></span><span></span><span></span>
+      </button>
+      <nav class="nav-links" id="navLinks">
+        <a href="#home">Home</a>
+        <a href="#browse" data-filter="all">Browse</a>
+        <a href="#browse" data-filter="movie">Movies</a>
+        <a href="#browse" data-filter="tv">Series</a>
+        <a href="#about">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" id="home">
+      <div class="container hero-inner">
+        <h1>Find your next movie or series</h1>
+        <p>Over 300 popular titles with posters, ratings and genres. Search by name or genre.</p>
+        <div class="search-box">
+          <input type="search" id="searchInput" placeholder="Search titles or genres, e.g. Batman, Comedy" aria-label="Search movies and series" autocomplete="off">
+          <button type="button" id="searchBtn">Search</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="browse" id="browse">
+      <div class="container">
+        <div class="filters" id="filters" role="group" aria-label="Filter by category">
+          <button class="chip active" data-filter="all">All</button>
+          <button class="chip" data-filter="movie">Movies</button>
+          <button class="chip" data-filter="tv">Series</button>
+          <button class="chip" data-filter="action">Action</button>
+          <button class="chip" data-filter="comedy">Comedy</button>
+          <button class="chip" data-filter="drama">Drama</button>
+          <button class="chip" data-filter="thriller">Thriller</button>
+          <button class="chip" data-filter="scifi">Sci-Fi</button>
+          <button class="chip" data-filter="animation">Animation</button>
+        </div>
+
+        <p class="count" id="count" aria-live="polite"></p>
+        <div class="message" id="message" hidden></div>
+        <div class="grid" id="grid"></div>
+        <div class="more-wrap"><button class="more" id="loadMore" hidden>Load more</button></div>
+      </div>
+    </section>
+
+    <section class="about" id="about">
+      <div class="container">
+        <h2>About Movie Hub</h2>
+        <p>Movie Hub is a college project built with HTML, CSS and JavaScript. Titles, posters and ratings load live from the TMDB API, so no poster images are stored in the project.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p>&copy; <span id="year"></span> Movie Hub. This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+    </div>
+  </footer>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+      <button class="modal-close" id="modalClose" aria-label="Close details">&times;</button>
+      <img id="mPoster" alt="">
+      <div class="modal-info">
+        <h3 id="mTitle"></h3>
+        <p class="modal-meta" id="mMeta"></p>
+        <p class="modal-genres" id="mGenres"></p>
+        <p id="mOverview"></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
