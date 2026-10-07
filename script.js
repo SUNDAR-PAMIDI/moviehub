@@ -1,15 +1,18 @@
 "use strict";
 
-/* ============ SETTINGS ============
-   Get a free API key at https://www.themoviedb.org/settings/api
-   and paste it between the quotes below. */
-const TMDB_API_KEY = "YOUR_TMDB_API_KEY_HERE";
+/* ============ SETTINGS ============ */
+const TMDB_API_KEY = "d6e484259642a002ce16743a60969ce5";
 
 const API = "https://api.themoviedb.org/3";
 const IMG_SMALL = "https://image.tmdb.org/t/p/w342";
 const IMG_LARGE = "https://image.tmdb.org/t/p/w500";
-const PAGES_PER_TYPE = 8;   // 8 pages x 20 titles x 2 types = about 320 titles
+const PAGES_PER_TYPE = 8;   // 8 pages x 20 titles x 2 types = about 320 English titles
+const PAGES_PER_LANG = 3;   // 3 pages x 20 titles x 2 types per Indian language
 const PAGE_SIZE = 24;       // cards shown per "Load more"
+const BATCH_SIZE = 6;       // how many requests are sent at the same time
+
+/* Original-language codes -> display names */
+const LANGS = { en: "English", hi: "Hindi", te: "Telugu", ta: "Tamil" };
 
 /* Inline fallback poster (no file needed, never breaks) */
 const FALLBACK = "data:image/svg+xml;utf8," + encodeURIComponent(
@@ -44,14 +47,41 @@ function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-async function getJSON(path, params = {}) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* Fetch JSON from TMDB. Retries dropped/throttled requests up to 3 times. */
+async function getJSON(path, params = {}, tries = 3) {
   const url = new URL(API + path);
   url.searchParams.set("api_key", TMDB_API_KEY);
   url.searchParams.set("language", "en-US");
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("TMDB request failed (" + res.status + ")");
-  return res.json();
+
+  let lastError;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.status === 401) {
+        const err = new Error("Invalid API key (401)");
+        err.fatal = true;
+        throw err;
+      }
+      if (res.ok) return await res.json();
+
+      lastError = new Error("TMDB request failed (" + res.status + ")");
+      /* Only retry server errors and rate limiting; other 4xx will not improve */
+      if (res.status < 500 && res.status !== 429) {
+        lastError.fatal = true;
+        throw lastError;
+      }
+    } catch (err) {
+      if (err.fatal) throw err;
+      lastError = err;
+    }
+    if (attempt < tries) await sleep(500 * attempt);
+  }
+  throw lastError;
 }
 
 function showMessage(title, text) {
@@ -71,21 +101,49 @@ async function loadData() {
 
   countEl.textContent = "Loading titles...";
   try {
-    const [movieGenres, tvGenres] = await Promise.all([
+    /* Genre lists: if one fails the site still works, genres are just fewer */
+    const genreResults = await Promise.allSettled([
       getJSON("/genre/movie/list"),
       getJSON("/genre/tv/list")
     ]);
     const genreMap = {};
-    movieGenres.genres.concat(tvGenres.genres).forEach((g) => { genreMap[g.id] = g.name; });
+    genreResults.forEach((s) => {
+      if (s.status === "fulfilled") {
+        s.value.genres.forEach((g) => { genreMap[g.id] = g.name; });
+      }
+    });
 
+    /* Each entry is a function, so requests start only when their batch runs */
     const requests = [];
+
+    /* Popular titles (mostly English / global) */
     for (let p = 1; p <= PAGES_PER_TYPE; p++) {
-      requests.push(getJSON("/movie/popular", { page: p }).then((d) => d.results.map((r) => ({ r, type: "movie" }))));
-      requests.push(getJSON("/tv/popular", { page: p }).then((d) => d.results.map((r) => ({ r, type: "tv" }))));
+      requests.push(() => getJSON("/movie/popular", { page: p }).then((d) => d.results.map((r) => ({ r, type: "movie" }))));
+      requests.push(() => getJSON("/tv/popular", { page: p }).then((d) => d.results.map((r) => ({ r, type: "tv" }))));
     }
-    const settled = await Promise.allSettled(requests);
+
+    /* Hindi, Telugu and Tamil titles */
+    ["hi", "te", "ta"].forEach((code) => {
+      for (let p = 1; p <= PAGES_PER_LANG; p++) {
+        const params = { with_original_language: code, sort_by: "popularity.desc", page: p };
+        requests.push(() => getJSON("/discover/movie", params).then((d) => d.results.map((r) => ({ r, type: "movie" }))));
+        requests.push(() => getJSON("/discover/tv", params).then((d) => d.results.map((r) => ({ r, type: "tv" }))));
+      }
+    });
+
+    /* Send requests in small batches instead of all at once */
+    const settled = [];
+    for (let i = 0; i < requests.length; i += BATCH_SIZE) {
+      const batch = requests.slice(i, i + BATCH_SIZE).map((fn) => fn());
+      settled.push(...(await Promise.allSettled(batch)));
+      countEl.textContent = "Loading titles... " + Math.min(i + BATCH_SIZE, requests.length) + " / " + requests.length;
+    }
+
     const raw = settled.filter((s) => s.status === "fulfilled").flatMap((s) => s.value);
-    if (!raw.length) throw new Error("No data returned. Check that your API key is correct.");
+    if (!raw.length) {
+      const firstError = settled.find((s) => s.status === "rejected");
+      throw (firstError && firstError.reason) || new Error("No data returned. Check that your API key is correct.");
+    }
 
     const seen = new Set();
     state.items = [];
@@ -97,6 +155,7 @@ async function loadData() {
       state.items.push({
         key,
         type,
+        lang: r.original_language || "en",
         title: r.title || r.name || "Untitled",
         year: date ? date.slice(0, 4) : "N/A",
         rating: r.vote_average ? r.vote_average.toFixed(1) : "NR",
@@ -111,7 +170,11 @@ async function loadData() {
   } catch (err) {
     console.error(err);
     countEl.textContent = "";
-    showMessage("Could not load titles", esc(err.message) + ". Check your internet connection and API key, then reload.");
+    showMessage(
+      "Could not load titles",
+      esc(err.message) + ". Check your API key (use the v3 API Key). If the message says 'Failed to fetch', " +
+      "your network may be blocking TMDB: try DNS 1.1.1.1 or 8.8.8.8, a mobile hotspot, or a VPN, then reload."
+    );
   }
 }
 
@@ -120,6 +183,7 @@ function matchesFilter(item) {
   const f = state.filter;
   if (f === "all") return true;
   if (f === "movie" || f === "tv") return item.type === f;
+  if (f.indexOf("lang-") === 0) return item.lang === f.slice(5);
   const wanted = GENRE_MATCH[f] || [];
   return item.genres.some((g) => wanted.some((w) => g.toLowerCase().indexOf(w) !== -1));
 }
@@ -128,7 +192,8 @@ function matchesQuery(item) {
   if (!state.query) return true;
   const q = state.query;
   const label = item.type === "tv" ? "series tv" : "movie film";
-  return (item.title + " " + item.genres.join(" ") + " " + label).toLowerCase().indexOf(q) !== -1;
+  const language = (LANGS[item.lang] || "").toLowerCase();
+  return (item.title + " " + item.genres.join(" ") + " " + label + " " + language).toLowerCase().indexOf(q) !== -1;
 }
 
 function applyFilters() {
@@ -165,7 +230,7 @@ function render() {
     loadMoreBtn.hidden = true;
     countEl.textContent = "0 titles found";
     const q = state.query ? ' for "' + esc(state.query) + '"' : "";
-    showMessage("No results" , "Nothing matched" + q + ". Try a different title, genre or category.");
+    showMessage("No results", "Nothing matched" + q + ". Try a different title, genre or category.");
     return;
   }
 
@@ -260,7 +325,7 @@ function openModal(key) {
   poster.src = item.posterLarge;
   poster.alt = "Poster of " + item.title;
   $("mTitle").textContent = item.title;
-  $("mMeta").textContent = (item.type === "tv" ? "Series" : "Movie") + " | " + item.year + " | Rating " + item.rating + "/10";
+  $("mMeta").textContent = (item.type === "tv" ? "Series" : "Movie") + " | " + item.year + " | " + (LANGS[item.lang] || item.lang.toUpperCase()) + " | Rating " + item.rating + "/10";
   $("mGenres").textContent = item.genres.join(", ");
   $("mOverview").textContent = item.overview;
   modal.hidden = false;
